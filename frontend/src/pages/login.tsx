@@ -31,7 +31,7 @@ export function LoginPage() {
   const onSubmit = async (data: LoginFormValues) => {
     try {
       setApiError(null);
-      const response = await api.post('/auth/login', {
+      const response = await api.post('/api/auth/login', {
         email: data.email,
         password: data.password,
       });

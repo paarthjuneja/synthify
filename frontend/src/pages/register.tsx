@@ -79,7 +79,7 @@ const AdminRegisterForm = () => {
 
   const onSubmit = async (data: AdminFormValues) => {
     try {
-      const response = await api.post('/auth/register', { ...data, role: 'hospital_admin' });
+      const response = await api.post('/api/auth/register', { ...data, role: 'hospital_admin' });
       await login(response.token);
       navigate('/dashboard/admin');
     } catch (error) {
