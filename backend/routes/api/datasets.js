@@ -3,6 +3,7 @@ const router = express.Router();
 const auth = require('../../middleware/auth');
 const Dataset = require('../../models/Dataset');
 const SyntheticTimeline = require('../../models/SyntheticTimeline');
+const { Parser } = require('json2csv');
 
 // @route   GET /api/datasets
 // @desc    Get all datasets for the logged-in researcher
@@ -11,9 +12,7 @@ router.get('/', auth, async (req, res) => {
     if (req.user.role !== 'researcher') {
         return res.status(403).json({ msg: 'Forbidden: Access is limited to researchers.' });
     }
-
     try {
-        // Find all datasets where the 'owner' field matches the logged-in user's ID
         const datasets = await Dataset.find({ owner: req.user.id }).sort({ createdAt: -1 });
         res.json(datasets);
     } catch (err) {
@@ -22,7 +21,39 @@ router.get('/', auth, async (req, res) => {
     }
 });
 
-const { Parser } = require('json2csv'); // Import the json2csv parser
+// @route   POST /api/datasets/request
+// @desc    Request and create a new custom dataset
+// @access  Private (Researcher only)
+router.post('/request', auth, async (req, res) => {
+    if (req.user.role !== 'researcher') {
+        return res.status(403).json({ msg: 'Forbidden: Access is limited to researchers.' });
+    }
+    const { name, filters } = req.body;
+    // Basic validation
+    if (!name || !filters) {
+        return res.status(400).json({ msg: 'Dataset name and filters are required.' });
+    }
+    try {
+        // A realistic limit to prevent overwhelming queries
+        const limit = 100; 
+        const timelines = await SyntheticTimeline.find(filters).limit(limit);
+
+        if (!timelines || timelines.length === 0) {
+            return res.status(404).json({ msg: 'No timelines found matching the specified criteria.' });
+        }
+        const newDataset = new Dataset({
+            owner: req.user.id,
+            name,
+            filtersUsed: filters,
+            timelines: timelines,
+        });
+        const dataset = await newDataset.save();
+        res.status(201).json(dataset); // Use 201 for resource creation
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Server Error');
+    }
+});
 
 // @route   GET /api/datasets/:id
 // @desc    Get a single dataset by its ID
@@ -30,16 +61,12 @@ const { Parser } = require('json2csv'); // Import the json2csv parser
 router.get('/:id', auth, async (req, res) => {
     try {
         const dataset = await Dataset.findById(req.params.id);
-
         if (!dataset) {
             return res.status(404).json({ msg: 'Dataset not found' });
         }
-
-        // Security check: Make sure the user owns this dataset
         if (dataset.owner.toString() !== req.user.id) {
             return res.status(401).json({ msg: 'User not authorized' });
         }
-
         res.json(dataset);
     } catch (err) {
         console.error(err.message);
@@ -53,7 +80,6 @@ router.get('/:id', auth, async (req, res) => {
 router.get('/:id/download', auth, async (req, res) => {
     try {
         const dataset = await Dataset.findById(req.params.id);
-
         if (!dataset) {
             return res.status(404).json({ msg: 'Dataset not found' });
         }
@@ -61,46 +87,17 @@ router.get('/:id/download', auth, async (req, res) => {
             return res.status(401).json({ msg: 'User not authorized' });
         }
 
-        // Convert the timelines array of objects into a CSV
         const json2csvParser = new Parser();
         const csv = json2csvParser.parse(dataset.timelines);
 
-        // Set headers to trigger a file download in the browser
         res.header('Content-Type', 'text/csv');
-        res.attachment(`dataset-${dataset.id}.csv`);
+        res.attachment(`dataset-${dataset._id}.csv`);
         res.send(csv);
-
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server Error');
     }
 });
 
-module.exports = router;
-
-// @route   POST /api/datasets/request
-// @desc    Request and create a new custom dataset from the central database
-// @access  Private (Researcher only)
-router.post('/request', auth, async (req, res) => {
-    // ... (This is the code you already have, no changes needed here) ...
-    if (req.user.role !== 'researcher') {
-        return res.status(403).json({ msg: 'Forbidden: Access is limited to researchers.' });
-    }
-    const { name, filters, limit = 100 } = req.body;
-    try {
-        const timelines = await SyntheticTimeline.find(filters).limit(limit);
-        if (!timelines || timelines.length === 0) {
-            return res.status(404).json({ msg: 'No timelines found matching the specified criteria.' });
-        }
-        const newDataset = new Dataset({
-            owner: req.user.id, name, filtersUsed: filters, timelines: timelines
-        });
-        const dataset = await newDataset.save();
-        res.json(dataset);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
-    }
-});
-
+// This should be the ONLY export in the file, and it must be at the end.
 module.exports = router;
